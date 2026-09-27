@@ -14,30 +14,39 @@ from pydantic import BaseModel, ConfigDict, Field
 import streamlit as st
 
 st.set_page_config(
-    page_title="Vedic Kundali & Tri-Agent Closed-Book Court",
+    page_title="Multi-Domain Tri-Agent Closed-Book Engine",
     layout="wide",
     initial_sidebar_state="expanded",
 )
 
-KB_STORAGE_DIR = "knowledge_bases"
+KB_BASE_DIR = "knowledge_bases"
 MEMORY_FILE = "agent_skill_memory.json"
 CITIES_FILE = "cities_india.json"
-os.makedirs(KB_STORAGE_DIR, exist_ok=True)
+os.makedirs(KB_BASE_DIR, exist_ok=True)
 
-# Initialize Google GenAI client (Reads GEMINI_API_KEY from environment)
-# Retrieve API key from Streamlit Cloud Secrets OR local environment variable
+CATEGORIES = [
+    "🪐 Astrology & Jyotish",
+    "🩺 Medicine & Ayurveda",
+    "📜 Philosophy & Darshanas",
+    "🕉️ Religion & Theology",
+    "🏦 Banking, Finance & Economics",
+    "🌐 Others & General"
+]
+
+# Ensure subdirectories exist for each category
+for cat in CATEGORIES:
+    clean_cat_folder = re.sub(r'[^a-zA-Z0-9_\-]', '_', cat)
+    os.makedirs(os.path.join(KB_BASE_DIR, clean_cat_folder), exist_ok=True)
+
+# Initialize Google GenAI client (Reads from Streamlit Cloud Secrets or local env)
 api_key = os.environ.get("GEMINI_API_KEY")
 if not api_key and hasattr(st, "secrets") and "GEMINI_API_KEY" in st.secrets:
-  api_key = st.secrets["GEMINI_API_KEY"]
+    api_key = st.secrets["GEMINI_API_KEY"]
 
 if not api_key:
-  st.error(
-      "⚠️ GEMINI_API_KEY is missing! Please configure it in your Streamlit Cloud"
-      " Secrets (Settings -> Secrets) or set it as an environment variable."
-  )
-  st.stop()
+    st.error("⚠️ GEMINI_API_KEY is missing! Please configure it in your Streamlit Cloud Secrets or set it as an environment variable.")
+    st.stop()
 
-# Initialize Google GenAI client with resolved key
 client = genai.Client(api_key=api_key)
 MODEL_ID = "gemini-flash-latest"
 
@@ -49,7 +58,7 @@ RASHIS = [
 
 
 # ============================================================================
-# 1. Dynamic External City Loader (Zero Hardcoding in Logic)
+# 1. Dynamic External City Loader
 # ============================================================================
 @st.cache_data
 def load_all_india_cities() -> Dict[str, tuple]:
@@ -85,32 +94,22 @@ def load_all_india_cities() -> Dict[str, tuple]:
             "Prayagraj (Allahabad), UP": [25.4358, 81.8463],
             "Ayodhya, Uttar Pradesh": [26.7922, 82.1998],
             "Agra, Uttar Pradesh": [27.1767, 78.0081],
-            "Meerut, Uttar Pradesh": [28.9845, 77.7064],
             "Mumbai, Maharashtra": [19.0760, 72.8777],
             "Pune, Maharashtra": [18.5204, 73.8567],
-            "Nagpur, Maharashtra": [21.1458, 79.0882],
             "Bengaluru, Karnataka": [12.9716, 77.5946],
             "Hyderabad, Telangana": [17.3850, 78.4867],
             "Chennai, Tamil Nadu": [13.0827, 80.2707],
             "Kolkata, West Bengal": [22.5726, 88.3639],
             "Ahmedabad, Gujarat": [23.0225, 72.5714],
-            "Surat, Gujarat": [21.1702, 72.8311],
             "Jaipur, Rajasthan": [26.9124, 75.7873],
-            "Jodhpur, Rajasthan": [26.2389, 73.0243],
             "Patna, Bihar": [25.5941, 85.1376],
-            "Gaya, Bihar": [24.7955, 85.0002],
             "Bhopal, Madhya Pradesh": [23.2599, 77.4126],
-            "Indore, Madhya Pradesh": [22.7196, 75.8577],
-            "Ujjain, Madhya Pradesh": [23.1765, 75.7885],
             "Chandigarh, Punjab/Haryana": [30.7333, 76.7794],
-            "Amritsar, Punjab": [31.6340, 74.8723],
             "Dehradun, Uttarakhand": [30.3165, 78.0322],
-            "Haridwar, Uttarakhand": [29.9457, 78.1642],
             "Ranchi, Jharkhand": [23.3441, 85.3096],
             "Bhubaneswar, Odisha": [20.2961, 85.8245],
             "Guwahati, Assam": [26.1445, 91.7362],
             "Thiruvananthapuram, Kerala": [8.5241, 76.9366],
-            "Kochi, Kerala": [9.9312, 76.2673],
         }
         with open(CITIES_FILE, "w", encoding="utf-8") as f:
             json.dump(initial_data, f, indent=2)
@@ -122,7 +121,7 @@ def load_all_india_cities() -> Dict[str, tuple]:
 
 
 # ============================================================================
-# 2. Astronomical Vedic Kundali Calculator
+# 2. Astronomical Vedic Kundali Calculator (Only active for Astrology)
 # ============================================================================
 def calculate_vedic_chart(dob: datetime.date, tob: datetime.time, lat: float, lon: float, overrides: Optional[dict] = None):
     ist_dt = datetime.datetime.combine(dob, tob)
@@ -235,20 +234,10 @@ def calculate_vedic_chart(dob: datetime.date, tob: datetime.time, lat: float, lo
                 dignity = "👑 Exalted (Uchha)"
             elif sign_idx == deb_s:
                 dignity = "⚠️ Debilitated (Neecha)"
-            elif p == "Mars" and sign_idx in [0, 7]:
-                dignity = "🏰 Own House (Swakshetra)"
-            elif p == "Jupiter" and sign_idx in [8, 11]:
-                dignity = "🏰 Own House (Swakshetra)"
-            elif p == "Saturn" and sign_idx in [9, 10]:
-                dignity = "🏰 Own House (Swakshetra)"
-            elif p == "Venus" and sign_idx in [1, 6]:
-                dignity = "🏰 Own House (Swakshetra)"
-            elif p == "Mercury" and sign_idx in [2, 5]:
-                dignity = "🏰 Own House (Swakshetra)"
-            elif p == "Sun" and sign_idx == 4:
-                dignity = "🏰 Own House (Swakshetra)"
-            elif p == "Moon" and sign_idx == 3:
-                dignity = "🏰 Own House (Swakshetra)"
+            elif p in ["Mars", "Jupiter", "Saturn", "Venus", "Mercury", "Sun", "Moon"]:
+                own_signs = {"Mars": [0, 7], "Jupiter": [8, 11], "Saturn": [9, 10], "Venus": [1, 6], "Mercury": [2, 5], "Sun": [4], "Moon": [3]}
+                if sign_idx in own_signs.get(p, []):
+                    dignity = "🏰 Own House (Swakshetra)"
 
         label = f"{p} (R)" if p == "Mars" else p
         d1_chart[p] = {
@@ -283,12 +272,8 @@ def calculate_vedic_chart(dob: datetime.date, tob: datetime.time, lat: float, lo
     }
 
 
-# ============================================================================
-# 3. Visual North Indian Diamond Kundali Generator
-# ============================================================================
 def render_north_indian_kundali(chart_data: dict):
     fig = go.Figure()
-    
     fig.add_shape(type="rect", x0=0, y0=0, x1=10, y1=10, line=dict(color="#CBD5E1", width=3))
     fig.add_shape(type="line", x0=0, y0=0, x1=10, y1=10, line=dict(color="#CBD5E1", width=2))
     fig.add_shape(type="line", x0=0, y0=10, x1=10, y1=0, line=dict(color="#CBD5E1", width=2))
@@ -298,18 +283,9 @@ def render_north_indian_kundali(chart_data: dict):
     fig.add_shape(type="line", x0=10, y0=5, x1=5, y1=10, line=dict(color="#CBD5E1", width=2))
 
     house_coords = {
-        1:  (5.0, 8.0),   # 1st House (Tanu Bhava)
-        2:  (2.5, 9.0),   # 2nd House
-        3:  (1.0, 7.5),   # 3rd House
-        4:  (2.5, 5.0),   # 4th House (Sukha Bhava)
-        5:  (1.0, 2.5),   # 5th House
-        6:  (2.5, 1.0),   # 6th House
-        7:  (5.0, 2.5),   # 7th House (Kalatra Bhava)
-        8:  (7.5, 1.0),   # 8th House
-        9:  (9.0, 2.5),   # 9th House
-        10: (7.5, 5.0),   # 10th House (Karma Bhava)
-        11: (9.0, 7.5),   # 11th House
-        12: (7.5, 9.0),   # 12th House
+        1: (5.0, 8.0), 2: (2.5, 9.0), 3: (1.0, 7.5), 4: (2.5, 5.0),
+        5: (1.0, 2.5), 6: (2.5, 1.0), 7: (5.0, 2.5), 8: (7.5, 1.0),
+        9: (9.0, 2.5), 10: (7.5, 5.0), 11: (9.0, 7.5), 12: (7.5, 9.0),
     }
 
     asc_sign = chart_data["Ascendant"]["Sign_Index"]
@@ -320,34 +296,20 @@ def render_north_indian_kundali(chart_data: dict):
         planets_here = occupants.get(h, [])
         planet_text = "<br>".join(planets_here) if planets_here else ""
 
-        fig.add_annotation(
-            x=hx, y=hy + 0.65,
-            text=f"<b>{house_sign_num}</b>",
-            showarrow=False,
-            font=dict(size=14, color="#F59E0B")
-        )
-        
+        fig.add_annotation(x=hx, y=hy + 0.65, text=f"<b>{house_sign_num}</b>", showarrow=False, font=dict(size=14, color="#F59E0B"))
         if planet_text:
-            fig.add_annotation(
-                x=hx, y=hy - 0.25,
-                text=f"<b>{planet_text}</b>",
-                showarrow=False,
-                font=dict(size=10, color="#38BDF8")
-            )
+            fig.add_annotation(x=hx, y=hy - 0.25, text=f"<b>{planet_text}</b>", showarrow=False, font=dict(size=10, color="#38BDF8"))
 
     fig.update_layout(
         xaxis=dict(range=[-0.5, 10.5], showgrid=False, zeroline=False, showticklabels=False),
         yaxis=dict(range=[-0.5, 10.5], showgrid=False, zeroline=False, showticklabels=False),
-        height=460,
-        margin=dict(l=10, r=10, t=10, b=10),
-        plot_bgcolor="#0F172A",
-        paper_bgcolor="#0F172A",
+        height=460, margin=dict(l=10, r=10, t=10, b=10), plot_bgcolor="#0F172A", paper_bgcolor="#0F172A",
     )
     return fig
 
 
 # ============================================================================
-# 4. Autonomous Skill Memory Bank (Auto-updates without user intervention)
+# 3. Autonomous Skill Memory Bank
 # ============================================================================
 def load_skill_memory() -> List[str]:
     if os.path.exists(MEMORY_FILE):
@@ -357,9 +319,9 @@ def load_skill_memory() -> List[str]:
         except Exception:
             return []
     return [
-        "Rule 1: Never answer using generic Vedic astrology. Every deduction must quote the specific uploaded book.",
-        "Rule 2: For Neechbhanga, verify if the debilitation lord is in Kendra to Lagna or Moon as instructed in classical chapters.",
-        "Rule 3: Always check D9 Navamsha sign confirmation for planetary strength before concluding house results."
+        "Rule 1: Never answer using generic external knowledge. Every deduction must quote the specific uploaded book.",
+        "Rule 2: Synthesize early foundational principles with later chapter exceptions.",
+        "Rule 3: Cross-domain queries must specify exactly which book/genre provided each portion of the verdict."
     ]
 
 def update_skill_memory(lesson: str):
@@ -367,39 +329,40 @@ def update_skill_memory(lesson: str):
     if lesson and lesson not in memory and len(lesson.strip()) > 10:
         memory.append(lesson.strip())
         with open(MEMORY_FILE, "w", encoding="utf-8") as f:
-            json.dump(memory[-30:], f, indent=2)
+            json.dump(memory[-35:], f, indent=2)
 
 
 # ============================================================================
-# 5. Pydantic V2 Migration-Compliant Schemas (No Deprecation Warnings)
+# 4. Multi-Domain Pydantic Schemas
 # ============================================================================
 class BookKnowledgeBase(BaseModel):
-    model_config = ConfigDict(extra="ignore")  # Pydantic V2 compliant
+    model_config = ConfigDict(extra="ignore")
 
-    book_title_or_topic: str = Field(default="Indexed Astrological Manuscript", description="Title or primary subject")
+    book_title_or_topic: str = Field(default="Indexed Manuscript", description="Title or primary subject")
+    domain_category: str = Field(default="Others & General", description="Domain category of the book")
     structural_outline: List[str] = Field(default_factory=list, description="Summary of chapters or sections indexed")
-    cataloged_rules_and_yogas: List[str] = Field(default_factory=list, description="Core formulas, yogas, and house results")
-    exceptions_and_cancellations: List[str] = Field(default_factory=list, description="Exceptions, Neechbhanga, aspects")
-    visual_diagrams_found: List[str] = Field(default_factory=list, description="Detected diagrams/tables")
-    foundational_principles: List[str] = Field(default_factory=list, description="Foundational rules")
+    cataloged_rules_and_yogas: List[str] = Field(default_factory=list, description="Core formulas, theories, laws, or principles")
+    exceptions_and_cancellations: List[str] = Field(default_factory=list, description="Exceptions, edge cases, or counter-theorems")
+    visual_diagrams_found: List[str] = Field(default_factory=list, description="Detected diagrams, tables, or charts")
+    foundational_principles: List[str] = Field(default_factory=list, description="Foundational axioms")
 
 
 class ScholarReasoning(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
-    client_chart_facts_used: str = Field(description="Exact verified placement of the queried planet (House, Sign, D9, D10, Dignity)")
+    domain_and_context_used: str = Field(description="Summary of selected books, categories, and factual inputs consulted")
     book_citations_only: List[str] = Field(description="Exact rules, chapters, or verses quoted ONLY from the uploaded book index")
-    cross_chapter_deduction: str = Field(description="Synthesis connecting foundational house rules with yoga results")
+    cross_chapter_deduction: str = Field(description="Synthesis connecting foundational rules with exceptions across the text")
     dialogue_statement: str = Field(description="Conversational statement spoken out loud by the Scholar avatar explaining the finding")
-    final_verdict: str = Field(description="Clear, reasoned astrological prediction")
+    final_verdict: str = Field(description="Clear, reasoned answer grounded strictly in the source books")
 
 
 class InquisitorEvaluation(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
-    unsubstantiated_claims: List[str] = Field(description="Claims made by Scholar NOT found in the uploaded book")
+    unsubstantiated_claims: List[str] = Field(description="Claims made by Scholar NOT found in the source book(s)")
     contradictions_found: List[str] = Field(description="Exceptions or contradictory rules in the book Scholar missed")
-    chart_fidelity_passed: bool = Field(description="True only if Scholar used the exact birth chart placements")
+    domain_fidelity_passed: bool = Field(description="True only if Scholar adhered strictly to the selected books")
     dialogue_statement: str = Field(description="Conversational rebuttal or validation spoken out loud by the Inquisitor avatar")
     critique: str = Field(description="Adversarial challenge exposing flaws or external knowledge leaks")
     autonomous_lesson: str = Field(description="A universal skill improvement rule for the agent memory bank")
@@ -416,21 +379,28 @@ class AuditVerdict(BaseModel):
 
 
 # ============================================================================
-# 6. Persistent Local Disk Storage
+# 5. Multi-Domain Persistent Knowledge Base Storage
 # ============================================================================
-def save_kb_to_disk(filename: str, cloud_file_name: str, kb: BookKnowledgeBase):
+def get_cat_folder(category: str) -> str:
+    clean_cat = re.sub(r'[^a-zA-Z0-9_\-]', '_', category)
+    folder = os.path.join(KB_BASE_DIR, clean_cat)
+    os.makedirs(folder, exist_ok=True)
+    return folder
+
+def save_kb_to_disk(filename: str, cloud_file_name: str, category: str, kb: BookKnowledgeBase):
+    folder = get_cat_folder(category)
     clean_name = re.sub(r'[^a-zA-Z0-9_\-]', '_', filename) + ".json"
-    filepath = os.path.join(KB_STORAGE_DIR, clean_name)
+    filepath = os.path.join(folder, clean_name)
     payload = {
         "cloud_file_name": cloud_file_name,
         "original_filename": filename,
+        "domain_category": category,
         "saved_at": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "kb_data": kb.model_dump()
     }
     with open(filepath, "w", encoding="utf-8") as f:
         json.dump(payload, f, indent=2)
     return filepath
-
 
 def load_kb_from_disk(filepath: str):
     with open(filepath, "r", encoding="utf-8") as f:
@@ -439,23 +409,28 @@ def load_kb_from_disk(filepath: str):
     kb = BookKnowledgeBase.model_validate(kb_dict)
     cloud_file_name = data.get("cloud_file_name")
     orig_name = data.get("original_filename", os.path.basename(filepath))
-    return kb, cloud_file_name, orig_name
+    category = data.get("domain_category", "Others & General")
+    return kb, cloud_file_name, orig_name, category
 
+def list_kbs_in_category(category: str) -> List[str]:
+    folder = get_cat_folder(category)
+    return [os.path.join(folder, f) for f in os.listdir(folder) if f.endswith(".json")]
 
-def get_saved_kb_files():
-    if not os.path.exists(KB_STORAGE_DIR):
-        return []
-    return [f for f in os.listdir(KB_STORAGE_DIR) if f.endswith(".json")]
+def list_all_kbs() -> List[dict]:
+    all_files = []
+    for cat in CATEGORIES:
+        folder = get_cat_folder(cat)
+        for f in os.listdir(folder):
+            if f.endswith(".json"):
+                full_p = os.path.join(folder, f)
+                all_files.append({"filepath": full_p, "category": cat, "filename": f})
+    return all_files
 
 
 # ============================================================================
-# 7. Resilient Quota Handler with Full Exception Interception
+# 6. Resilient Inference Engine
 # ============================================================================
 def safe_generate_content(contents: list, config: types.GenerateContentConfig):
-    """
-    Executes model inference. Catches and pauses on 429 quota exhaustion or 503 overload.
-    Will NEVER leak an unhandled 429 crash to the UI.
-    """
     for attempt in range(6):
         try:
             return client.models.generate_content(
@@ -472,26 +447,26 @@ def safe_generate_content(contents: list, config: types.GenerateContentConfig):
                     try:
                         wait_sec = min(max(float(match.group(1)) + 1.0, 5.0), 50.0)
                     except Exception:
-                        wait_sec = 15.0
-                with st.spinner(f"⏳ Free quota cooling down ({int(wait_sec)}s). Auto-resuming shortly..."):
+                        pass
+                with st.spinner(f"⏳ Free quota buffer: Cooling down for {int(wait_sec)}s..."):
                     time.sleep(wait_sec)
             else:
-                raise e
+                st.error(f"⚠️ API Client Error: {err_msg}")
+                st.stop()
         except google.genai.errors.ServerError:
-            time.sleep(min(5.0 * (attempt + 1), 30.0))
+            time.sleep(min(6.0 * (attempt + 1), 30.0))
 
-    # Guarded final attempt
     try:
         return client.models.generate_content(model=MODEL_ID, contents=contents, config=config)
     except Exception as e:
-        time.sleep(15.0)
-        return client.models.generate_content(model=MODEL_ID, contents=contents, config=config)
+        st.error(f"⚠️ Gemini quota saturated: {str(e)}. Please wait 30s and try again.")
+        st.stop()
 
-
-def build_book_knowledge_base(book_file_ref: types.File) -> BookKnowledgeBase:
-    system_prompt = """
-    You are an expert Chief Archivist. Analyze the provided book or manuscript.
-    Extract the title, structural chapters, foundational rules, yogas, and cancellations into a concise knowledge roadmap.
+def build_book_knowledge_base(book_file_ref: types.File, category: str) -> BookKnowledgeBase:
+    system_prompt = f"""
+    You are an expert Chief Archivist specializing in {category}.
+    Analyze the provided manuscript. Extract the title, structural chapters, foundational rules/theorems, 
+    and edge-cases/cancellations into a structured Knowledge Base.
     """
     config = types.GenerateContentConfig(
         system_instruction=system_prompt,
@@ -500,29 +475,49 @@ def build_book_knowledge_base(book_file_ref: types.File) -> BookKnowledgeBase:
         temperature=0.1,
     )
     response = safe_generate_content(
-        contents=[book_file_ref, "Index the structural knowledge base of this manuscript."],
+        contents=[book_file_ref, f"Index this {category} manuscript."],
         config=config
     )
-    return BookKnowledgeBase.model_validate_json(response.text)
+    kb = BookKnowledgeBase.model_validate_json(response.text)
+    kb.domain_category = category
+    return kb
 
 
-def run_scholar(book_file_ref: Optional[types.File], kb: BookKnowledgeBase, chart_data: dict, user_query: str, learned_memory: List[str]) -> ScholarReasoning:
+# ============================================================================
+# 7. Tri-Agent Deliberation Core (Single Book, Category, or Cross-Genre)
+# ============================================================================
+def run_scholar(
+    book_file_ref: Optional[types.File],
+    knowledge_bases: List[BookKnowledgeBase],
+    user_query: str,
+    learned_memory: List[str],
+    chart_data: Optional[dict] = None
+) -> ScholarReasoning:
+    kb_summaries = []
+    for idx, kb in enumerate(knowledge_bases):
+        kb_summaries.append({
+            f"Book_{idx+1}_Title": kb.book_title_or_topic,
+            "Category": kb.domain_category,
+            "Rules_or_Theorems": kb.cataloged_rules_and_yogas,
+            "Exceptions_or_EdgeCases": kb.exceptions_and_cancellations,
+            "Foundations": kb.foundational_principles
+        })
+
+    chart_context = ""
+    if chart_data is not None:
+        chart_context = f"\nUSER'S ASTROLOGICAL CHART FACTS:\n{json.dumps(chart_data, indent=2)}\n"
+
     system_prompt = f"""
-    You are Agent 1: 'The Scholar'. You interpret Vedic charts using ONLY the provided book.
+    You are Agent 1: 'The Scholar'. You synthesize answers using ONLY the provided book knowledge bases.
     
     STRICT NEGATIVE CONSTRAINT:
-    - You must NOT use your own general training knowledge about astrology or planetary meanings.
-    - If a prediction or rule is not explicitly found in the uploaded book's index, state: "Not mentioned in source text".
-    - Base every deduction on the user's computed chart facts below and the book.
-    - Include a lively, cartoonish dialogue_statement speaking to your peers (e.g., "Fellow agents, I have cross-referenced the manuscript and found...").
+    - You must NOT use your own general training knowledge.
+    - If an assertion is not explicitly found in the uploaded books, state: "Not mentioned in the provided text".
+    - If multiple books or genres are provided, synthesize them collaboratively while citing which book provided which rule.
+    {chart_context}
     
-    USER'S EXACT BIRTH CHART FACTUAL POSITIONS (Calculated with IST UTC+5:30):
-    {json.dumps(chart_data, indent=2)}
-    
-    BOOK KNOWLEDGE BASE:
-    - Topic: {kb.book_title_or_topic}
-    - Rules & Yogas: {kb.cataloged_rules_and_yogas}
-    - Exceptions: {kb.exceptions_and_cancellations}
+    ACTIVE REFERENCE KNOWLEDGE BASES:
+    {json.dumps(kb_summaries, indent=2)}
     
     ACCUMULATED SKILL MEMORY:
     {json.dumps(learned_memory, indent=2)}
@@ -533,7 +528,7 @@ def run_scholar(book_file_ref: Optional[types.File], kb: BookKnowledgeBase, char
         response_schema=ScholarReasoning,
         temperature=0.1,
     )
-    contents = [f"First check the user's birth chart for the queried planet, then apply the book rules to answer: {user_query}"]
+    contents = [f"Consult the active books to answer: {user_query}"]
     if book_file_ref is not None:
         contents.insert(0, book_file_ref)
         
@@ -541,23 +536,28 @@ def run_scholar(book_file_ref: Optional[types.File], kb: BookKnowledgeBase, char
     return ScholarReasoning.model_validate_json(response.text)
 
 
-def run_inquisitor(kb: BookKnowledgeBase, chart_data: dict, user_query: str, scholar_output: ScholarReasoning) -> InquisitorEvaluation:
+def run_inquisitor(
+    knowledge_bases: List[BookKnowledgeBase],
+    user_query: str,
+    scholar_output: ScholarReasoning,
+    chart_data: Optional[dict] = None
+) -> InquisitorEvaluation:
+    kb_summaries = [{"Title": kb.book_title_or_topic, "Category": kb.domain_category, "Rules": kb.cataloged_rules_and_yogas, "Exceptions": kb.exceptions_and_cancellations} for kb in knowledge_bases]
+
     system_prompt = f"""
     You are Agent 2: 'The Inquisitor'. Your task is to aggressively challenge Agent 1 and verify adherence.
     
     ANTI-HALLUCINATION & ANTI-COLLUSION AUDIT:
-    1. Did Agent 1 hallucinate using external knowledge NOT found in the Book Knowledge Base?
-    2. Did Agent 1 accurately use the user's chart positions?
+    1. Did Agent 1 hallucinate using external knowledge NOT found in the provided Book Knowledge Bases?
+    2. Did Agent 1 accurately represent the source books without blending unsupported opinions?
     3. Formulate one autonomous lesson for the agent skill memory bank.
-    4. Provide a punchy cartoonish dialogue_statement challenging or validating the Scholar (e.g., "Scholar, hold your horses! Did you check the 12th house retrograde state?!").
     
-    CHART DATA: {json.dumps(chart_data)}
-    BOOK KB: {json.dumps(kb.model_dump())}
+    REFERENCE BOOKS: {json.dumps(kb_summaries)}
     """
     eval_prompt = f"""
     QUERY: {user_query}
     SCHOLAR SUBMISSION: {scholar_output.model_dump_json()}
-    Audit this submission strictly against the book ground truth.
+    Audit this submission strictly against the ground truth books.
     """
     config = types.GenerateContentConfig(
         system_instruction=system_prompt,
@@ -569,17 +569,23 @@ def run_inquisitor(kb: BookKnowledgeBase, chart_data: dict, user_query: str, sch
     return InquisitorEvaluation.model_validate_json(response.text)
 
 
-def run_auditor(kb: BookKnowledgeBase, user_query: str, scholar: ScholarReasoning, inquisitor: InquisitorEvaluation) -> AuditVerdict:
+def run_auditor(
+    knowledge_bases: List[BookKnowledgeBase],
+    user_query: str,
+    scholar: ScholarReasoning,
+    inquisitor: InquisitorEvaluation
+) -> AuditVerdict:
+    kb_summaries = [{"Title": kb.book_title_or_topic, "Category": kb.domain_category} for kb in knowledge_bases]
+
     system_prompt = f"""
     You are Agent 3: 'The Supreme Auditor'. You report only to the user.
     
     RESPONSIBILITIES:
     1. Ensure ZERO external knowledge leaked into the response.
     2. Check if Agent 2 colluded with Agent 1.
-    3. Issue a dignified cartoonish dialogue_statement proclaiming the final court ruling.
-    4. Certify the final answer grounded solely in the book's teachings.
+    3. Certify the final answer grounded solely in the book(s).
     
-    GROUND TRUTH: {json.dumps(kb.model_dump())}
+    SOURCE BOOKS CONSULTED: {json.dumps(kb_summaries)}
     """
     audit_payload = f"""
     QUERY: {user_query}
@@ -598,73 +604,89 @@ def run_auditor(kb: BookKnowledgeBase, user_query: str, scholar: ScholarReasonin
 
 
 # ============================================================================
-# 8. Streamlit User Interface
+# 8. Streamlit Frontend UI
 # ============================================================================
-st.title("🕉️ Vedic Kundali Engine & Tri-Agent Closed-Book Court")
-st.caption("Dynamic City Loader | North Indian Diamond Kundali | Animated Cartoon Communication Arena | Auto Skill Evolution")
+st.title("📚 Multi-Domain Tri-Agent Closed-Book Engine")
+st.caption("Categorized Knowledge Base | Cross-Genre Inquiries | Strict Negative Constraints | Cartoon Multi-Agent Workflows")
 
 CITIES_DB = load_all_india_cities()
 
+# Sidebar: Categorized Library & Uploads
 with st.sidebar:
-    st.header("👤 1. Birth Particulars (IST UTC+05:30)")
-    dob = st.date_input("Date of Birth:", value=datetime.date(1997, 2, 9), min_value=datetime.date(1930, 1, 1))
-    tob = st.time_input("Time of Birth (IST):", value=datetime.time(23, 50))
+    st.header("🗂️ Knowledge Base Library")
     
-    city_choice = st.selectbox("Birth City (Search Any Indian City):", list(CITIES_DB.keys()), index=0)
-    
-    if city_choice == "Custom / Other (Enter Coordinates Manually)":
-        custom_c1, custom_c2 = st.columns(2)
-        lat = custom_c1.number_input("Latitude (°N):", value=28.6139, format="%.4f")
-        lon = custom_c2.number_input("Longitude (°E):", value=77.2090, format="%.4f")
+    active_domain_mode = st.radio(
+        "Search Scope:",
+        ["🎯 Single Category Search", "🌐 Cross-Genre / All Categories"],
+        index=0
+    )
+
+    if active_domain_mode == "🎯 Single Category Search":
+        selected_category = st.selectbox("Select Domain:", CATEGORIES, index=0)
     else:
-        lat, lon = CITIES_DB[city_choice]
-        st.caption(f"📍 Coordinates: **{lat}° N, {lon}° E** | Timezone: **IST (UTC+05:30)**")
-
-    with st.expander("🛠️ Fine-Tune Planetary Placements (Optional)"):
-        st.caption("Customize any planet's sign/degrees if your family Kundali uses a specific Ayanamsha variant:")
-        overrides = {}
-        cols = st.columns(2)
-        for idx, p in enumerate(["Mercury", "Venus", "Mars", "Jupiter", "Sun", "Moon", "Saturn", "Rahu", "Ketu"]):
-            col = cols[idx % 2]
-            def_sign = "Capricorn" if p in ["Mercury", "Venus", "Jupiter", "Sun"] else ("Virgo" if p in ["Mars", "Rahu"] else ("Pisces" if p in ["Saturn", "Ketu"] else "Aquarius"))
-            s_val = col.selectbox(f"{p} Sign:", RASHIS, index=RASHIS.index(def_sign), key=f"sel_{p}")
-            d_val = col.number_input(f"{p} Deg:", min_value=0.0, max_value=29.99, value=12.0, step=0.5, key=f"deg_{p}")
-            overrides[p] = (s_val, d_val)
-
-    if st.button("🔮 Calculate Vedic Kundali", key="btn_calc") or "user_kundali" not in st.session_state:
-        st.session_state["user_kundali"] = calculate_vedic_chart(dob, tob, lat, lon, overrides=overrides)
-        st.session_state["active_birth_info"] = f"{dob} at {tob} IST ({city_choice})"
-        st.success("Kundali Calculated!")
+        selected_category = "🌐 All Categories (Cross-Genre)"
+        st.info("Searching across all categories. Useful for questions connecting Medicine, Philosophy, Astrology, Religion, etc.")
 
     st.divider()
-    st.header("🗄️ 2. Book Knowledge Base")
-    kb_mode = st.radio("Knowledge Base Source:", ["📂 Load Saved Knowledge Base", "📤 Index New Book/PDF"], index=0)
 
-    if kb_mode == "📂 Load Saved Knowledge Base":
-        saved_files = get_saved_kb_files()
-        if saved_files:
-            selected_file = st.selectbox("Select Cached Book Index:", saved_files)
-            if st.button("⚡ Load Selected Index", key="btn_load_kb"):
-                loaded_kb, cloud_file_name, orig_name = load_kb_from_disk(os.path.join(KB_STORAGE_DIR, selected_file))
-                st.session_state["knowledge_base"] = loaded_kb
-                st.session_state["active_file_name"] = orig_name
+    # Upload & Management
+    kb_mode = st.radio("Library Action:", ["📂 Select Existing Book(s)", "📤 Index & Upload New Book"], index=0)
+
+    active_kbs: List[BookKnowledgeBase] = []
+    active_cloud_file: Optional[types.File] = None
+    active_book_names: List[str] = []
+
+    if kb_mode == "📂 Select Existing Book(s)":
+        if active_domain_mode == "🎯 Single Category Search":
+            avail_files = list_kbs_in_category(selected_category)
+            if avail_files:
+                file_options = {os.path.basename(f).replace(".json", ""): f for f in avail_files}
                 
-                if cloud_file_name:
-                    try:
-                        st.session_state["cloud_file"] = client.files.get(name=cloud_file_name)
-                    except Exception:
-                        st.session_state["cloud_file"] = None
+                search_all_in_cat = st.checkbox("🔍 Query ALL books in this category simultaneously", value=True)
+                if search_all_in_cat:
+                    selected_files = list(file_options.values())
+                    st.caption(f"Will search across all {len(selected_files)} book(s) in {selected_category}.")
                 else:
+                    chosen_key = st.selectbox("Select Specific Book:", list(file_options.keys()))
+                    selected_files = [file_options[chosen_key]]
+
+                if st.button("⚡ Load Selected Knowledge Base(s)", key="btn_load_books"):
+                    for p in selected_files:
+                        loaded_kb, c_name, orig_n, c_cat = load_kb_from_disk(p)
+                        active_kbs.append(loaded_kb)
+                        active_book_names.append(orig_n)
+                    st.session_state["loaded_kbs"] = active_kbs
+                    st.session_state["loaded_book_names"] = active_book_names
                     st.session_state["cloud_file"] = None
-                st.success(f"Loaded: {orig_name}")
+                    st.success(f"Loaded {len(active_kbs)} book(s) ready for querying!")
+            else:
+                st.info(f"No indexed books in '{selected_category}' yet. Switch to 'Index & Upload New Book' to add one.")
         else:
-            st.info("No saved knowledge bases found yet. Select 'Index New Book/PDF' to create one.")
-            
+            # Cross-Genre Selection
+            all_entries = list_all_kbs()
+            if all_entries:
+                st.caption(f"Found {len(all_entries)} books across all categories.")
+                all_p = [e["filepath"] for e in all_entries]
+                if st.button("⚡ Load ALL Books Across All Categories", key="btn_load_omni"):
+                    for p in all_p:
+                        loaded_kb, c_name, orig_n, c_cat = load_kb_from_disk(p)
+                        active_kbs.append(loaded_kb)
+                        active_book_names.append(f"[{c_cat}] {orig_n}")
+                    st.session_state["loaded_kbs"] = active_kbs
+                    st.session_state["loaded_book_names"] = active_book_names
+                    st.session_state["cloud_file"] = None
+                    st.success(f"Loaded {len(active_kbs)} books across all genres!")
+            else:
+                st.info("No books indexed anywhere yet. Please upload your first book.")
+
     else:
-        uploaded_file = st.file_uploader("Upload Astrological Book (PDF/PNG/JPG):", type=["pdf", "png", "jpg"])
+        st.subheader("Upload New Document")
+        target_upload_cat = st.selectbox("Assign to Category:", CATEGORIES, index=0)
+        uploaded_file = st.file_uploader("Upload Book / Paper / Scan (PDF/Image):", type=["pdf", "png", "jpg"])
+        
         if uploaded_file is not None:
-            if st.button("🚀 Process & Permanently Save Index", key="btn_save_kb"):
-                with st.spinner("Indexing book into Closed-Book Knowledge Base..."):
+            if st.button("🚀 Process & Permanently Index Book", key="btn_process_book"):
+                with st.spinner(f"Indexing into '{target_upload_cat}'..."):
                     suffix = os.path.splitext(uploaded_file.name)[1]
                     with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
                         tmp.write(uploaded_file.read())
@@ -677,16 +699,49 @@ with st.sidebar:
                         time.sleep(1)
                         cloud_file = client.files.get(name=cloud_file.name)
 
-                    kb = build_book_knowledge_base(cloud_file)
-                    saved_path = save_kb_to_disk(uploaded_file.name, cloud_file.name, kb)
+                    kb = build_book_knowledge_base(cloud_file, target_upload_cat)
+                    saved_path = save_kb_to_disk(uploaded_file.name, cloud_file.name, target_upload_cat, kb)
 
+                    st.session_state["loaded_kbs"] = [kb]
+                    st.session_state["loaded_book_names"] = [uploaded_file.name]
                     st.session_state["cloud_file"] = cloud_file
-                    st.session_state["knowledge_base"] = kb
-                    st.session_state["active_file_name"] = uploaded_file.name
-                    st.success(f"Indexed & permanently saved to `{saved_path}`!")
+                    st.success(f"Indexed & saved to {target_upload_cat} (`{os.path.basename(saved_path)}`)!")
 
-# Main Stage: Interactive Kundali & Chart Visualizer
-if "user_kundali" in st.session_state:
+    # Astrology Section: Render birth inputs ONLY when Astrology is involved
+    is_astrology_active = (selected_category == "🪐 Astrology & Jyotish") or (
+        active_domain_mode == "🌐 Cross-Genre / All Categories" and any("Astrology" in b for b in st.session_state.get("loaded_book_names", []))
+    )
+
+    if is_astrology_active:
+        st.divider()
+        st.header("👤 Birth Details (Astrology Only)")
+        dob = st.date_input("Date of Birth:", value=datetime.date(1997, 2, 9), min_value=datetime.date(1930, 1, 1))
+        tob = st.time_input("Time of Birth (IST):", value=datetime.time(23, 50))
+        city_choice = st.selectbox("Birth City:", list(CITIES_DB.keys()), index=0)
+
+        if city_choice == "Custom / Other (Enter Coordinates Manually)":
+            custom_c1, custom_c2 = st.columns(2)
+            lat = custom_c1.number_input("Latitude (°N):", value=28.6139, format="%.4f")
+            lon = custom_c2.number_input("Longitude (°E):", value=77.2090, format="%.4f")
+        else:
+            lat, lon = CITIES_DB[city_choice]
+
+        if st.button("🔮 Calculate Vedic Kundali", key="btn_calc_kundali") or "user_kundali" not in st.session_state:
+            st.session_state["user_kundali"] = calculate_vedic_chart(dob, tob, lat, lon)
+            st.session_state["active_birth_info"] = f"{dob} at {tob} IST ({city_choice})"
+            st.success("Kundali Calculated!")
+
+
+# ============================================================================
+# Main Stage: Dynamic Domain Display
+# ============================================================================
+
+# 1. Show Horoscope ONLY if Astrology is selected
+is_astrology_context = (selected_category == "🪐 Astrology & Jyotish") or (
+    active_domain_mode == "🌐 Cross-Genre / All Categories" and any("Astrology" in b for b in st.session_state.get("loaded_book_names", []))
+)
+
+if is_astrology_context and "user_kundali" in st.session_state:
     kundali = st.session_state["user_kundali"]
     asc = kundali["Ascendant"]
     
@@ -698,7 +753,6 @@ if "user_kundali" in st.session_state:
     k4.metric("Ayanamsha", "Chitra Paksha / Lahiri")
 
     col_chart_ui, col_table_ui = st.columns([1.1, 1.2])
-
     with col_chart_ui:
         st.markdown("#### 💎 North Indian Diamond Chart (D1 Lagna)")
         fig_kundali = render_north_indian_kundali(kundali)
@@ -706,60 +760,52 @@ if "user_kundali" in st.session_state:
 
     with col_table_ui:
         tab_d1, tab_d9, tab_d10 = st.tabs(["🪐 D1 Planetary Table", "✨ D9 Navamsha", "💼 D10 Dashamsha"])
-        
         with tab_d1:
-            d1_rows = []
-            for p, vals in kundali["D1_Lagna"].items():
-                d1_rows.append({
-                    "Planet": p,
-                    "House (Bhava)": f"House {vals['House']}",
-                    "Sign (Rashi)": vals["Sign"],
-                    "Degree in Sign": f"{vals['Degrees']}°",
-                    "Dignity": vals["Dignity"]
-                })
+            d1_rows = [{"Planet": p, "House": f"House {v['House']}", "Sign": v["Sign"], "Degrees": f"{v['Degrees']}°", "Dignity": v["Dignity"]} for p, v in kundali["D1_Lagna"].items()]
             st.dataframe(d1_rows)
-
         with tab_d9:
             d9_rows = [{"Planet": p, "Navamsha House": f"House {v['House']}", "Sign": v["Sign"]} for p, v in kundali["D9_Navamsha"].items()]
             st.dataframe(d9_rows)
-
         with tab_d10:
             d10_rows = [{"Planet": p, "Dashamsha House": f"House {v['House']}", "Sign": v["Sign"]} for p, v in kundali["D10_Dashamsha"].items()]
             st.dataframe(d10_rows)
 
-st.divider()
+    st.divider()
 
-# Question & Answering Arena
-if "knowledge_base" not in st.session_state:
-    st.warning("👈 Please load a saved Knowledge Base or upload a book from the sidebar to begin querying.")
+# 2. Main Question & Answering Arena
+if "loaded_kbs" not in st.session_state or not st.session_state["loaded_kbs"]:
+    st.warning("👈 Please select or index book(s) in the sidebar to begin.")
 else:
-    st.subheader(f"🔮 Consult Tri-Agent Court — Grounded in `{st.session_state['active_file_name']}`")
-    query = st.text_input(
-        "Ask about any planetary placement or life area:",
-        value="What is the prediction for my Mars based on the book?"
-    )
+    active_kbs = st.session_state["loaded_kbs"]
+    book_titles = st.session_state["loaded_book_names"]
 
-    consult_btn = st.button("⚡ Verify Chart Placements & Argue Book Rules", key="btn_consult")
+    st.subheader(f"🔮 Consult Tri-Agent Court — Grounded in {len(active_kbs)} Book(s)")
+    with st.expander("📚 Active Reference Sources"):
+        for b in book_titles:
+            st.markdown(f"- 📖 `{b}`")
 
-    if consult_btn and query.strip():
+    default_q = "What is the prediction for my Mars based on the book?" if is_astrology_context else "What does the text state regarding the primary subject?"
+    user_query = st.text_input("Enter your inquiry (applies cross-chapter reasoning strictly from the active texts):", value=default_q)
+
+    consult_btn = st.button("⚡ Consult Tri-Agent Court (Verify & Argue Sources)", key="btn_run_court")
+
+    if consult_btn and user_query.strip():
         memory = load_skill_memory()
+        chart_input = st.session_state.get("user_kundali") if is_astrology_context else None
 
         st.markdown("### 🎭 The Cartoonish Agent Deliberation Arena")
-        st.caption("Watch the three specialized agents converse, challenge, and certify claims in real time:")
-
-        # Three Cartoon Agent Comic Cards with Speech Bubbles
         p1, p2, p3 = st.columns(3)
         c1 = p1.empty()
         c2 = p2.empty()
         c3 = p3.empty()
 
-        # Initial Comic Setup
+        # Step 1: The Scholar
         c1.markdown("""
         <div style="background:#0F172A; border:2px solid #38BDF8; border-radius:16px; padding:16px; text-align:center;">
             <div style="font-size:45px;">🧑‍🏫</div>
             <h4 style="margin:4px 0; color:#38BDF8;">The Scholar</h4>
             <div style="background:#1E293B; border-radius:12px; padding:10px; margin-top:8px; border:1px dashed #38BDF8; color:#E2E8F0; font-size:13px;">
-                💭 <i>"Opening ancient scroll... Examining your birth chart for Mars!"</i>
+                💭 <i>"Cross-referencing active manuscripts and chapters..."</i>
             </div>
         </div>
         """, unsafe_allow_html=True)
@@ -769,7 +815,7 @@ else:
             <div style="font-size:45px;">⚔️</div>
             <h4 style="margin:4px 0; color:#F59E0B;">The Inquisitor</h4>
             <div style="background:#1E293B; border-radius:12px; padding:10px; margin-top:8px; border:1px dashed #64748B; color:#94A3B8; font-size:13px;">
-                ⏳ <i>"Sharpening spear... Waiting for Scholar's claims to dissect!"</i>
+                ⏳ <i>"Preparing adversarial challenges..."</i>
             </div>
         </div>
         """, unsafe_allow_html=True)
@@ -779,84 +825,79 @@ else:
             <div style="font-size:45px;">⚖️</div>
             <h4 style="margin:4px 0; color:#10B981;">Supreme Auditor</h4>
             <div style="background:#1E293B; border-radius:12px; padding:10px; margin-top:8px; border:1px dashed #64748B; color:#94A3B8; font-size:13px;">
-                ⏳ <i>"Observing from the bench. Ready to strike down any hallucinations!"</i>
+                ⏳ <i>"Observing court proceedings..."</i>
             </div>
         </div>
         """, unsafe_allow_html=True)
 
-        # 1. Scholar Runs
         scholar_res = run_scholar(
             st.session_state.get("cloud_file"),
-            st.session_state["knowledge_base"],
-            st.session_state["user_kundali"],
-            query,
-            memory
+            active_kbs,
+            user_query,
+            memory,
+            chart_data=chart_input
         )
 
-        # Scholar Speaks out loud in dialogue bubble
         c1.markdown(f"""
         <div style="background:#0F172A; border:2px solid #38BDF8; border-radius:16px; padding:16px; text-align:center; box-shadow:0 0 15px rgba(56,189,248,0.3);">
             <div style="font-size:45px;">🧑‍🏫</div>
             <h4 style="margin:4px 0; color:#38BDF8;">The Scholar</h4>
-            <div style="background:#0369A1; border-radius:12px; padding:12px; margin-top:8px; color:#FFFFFF; font-size:13px; text-align:left; box-shadow:0 2px 4px rgba(0,0,0,0.4);">
-                💬 <b>"Fellow Court!</b> {scholar_res.dialogue_statement}"
+            <div style="background:#0369A1; border-radius:12px; padding:12px; margin-top:8px; color:#FFFFFF; font-size:13px; text-align:left;">
+                💬 <b>"Court members!</b> {scholar_res.dialogue_statement}"
             </div>
-            <p style="color:#38BDF8; font-size:11px; margin-top:6px;">✅ Verified from Birth Chart & Manuscript</p>
+            <p style="color:#38BDF8; font-size:11px; margin-top:6px;">✅ Verified from Source Index</p>
         </div>
         """, unsafe_allow_html=True)
 
-        time.sleep(1)
+        time.sleep(3)  # RPM buffer for Free Tier
 
-        # 2. Inquisitor Turns Active & Argues
+        # Step 2: The Inquisitor
         c2.markdown("""
         <div style="background:#0F172A; border:2px solid #F59E0B; border-radius:16px; padding:16px; text-align:center;">
             <div style="font-size:45px;">⚔️</div>
             <h4 style="margin:4px 0; color:#F59E0B;">The Inquisitor</h4>
             <div style="background:#1E293B; border-radius:12px; padding:10px; margin-top:8px; border:1px dashed #F59E0B; color:#E2E8F0; font-size:13px;">
-                💭 <i>"Analyzing Scholar's verses against book exceptions... Hunting for flaws!"</i>
+                💭 <i>"Auditing Scholar claims against exceptions... Testing for leaks!"</i>
             </div>
         </div>
         """, unsafe_allow_html=True)
 
-        inquisitor_res = run_inquisitor(st.session_state["knowledge_base"], st.session_state["user_kundali"], query, scholar_res)
-        
+        inquisitor_res = run_inquisitor(active_kbs, user_query, scholar_res, chart_data=chart_input)
         if inquisitor_res.autonomous_lesson:
             update_skill_memory(inquisitor_res.autonomous_lesson)
 
-        # Inquisitor Speaks in speech bubble
         c2.markdown(f"""
         <div style="background:#0F172A; border:2px solid #F59E0B; border-radius:16px; padding:16px; text-align:center; box-shadow:0 0 15px rgba(245,158,11,0.3);">
             <div style="font-size:45px;">⚔️</div>
             <h4 style="margin:4px 0; color:#F59E0B;">The Inquisitor</h4>
-            <div style="background:#B45309; border-radius:12px; padding:12px; margin-top:8px; color:#FFFFFF; font-size:13px; text-align:left; box-shadow:0 2px 4px rgba(0,0,0,0.4);">
-                💬 <b>"Scholar, halt!</b> {inquisitor_res.dialogue_statement}"
+            <div style="background:#B45309; border-radius:12px; padding:12px; margin-top:8px; color:#FFFFFF; font-size:13px; text-align:left;">
+                💬 <b>"Hold on, Scholar!</b> {inquisitor_res.dialogue_statement}"
             </div>
-            <p style="color:#FCD34D; font-size:11px; margin-top:6px;">🛡️ Adversarial Check Complete & Skill Bank Updated</p>
+            <p style="color:#FCD34D; font-size:11px; margin-top:6px;">🛡️ Adversarial Audit Concluded</p>
         </div>
         """, unsafe_allow_html=True)
 
-        time.sleep(1)
+        time.sleep(3)  # RPM buffer for Free Tier
 
-        # 3. Supreme Auditor Delivers Verdict
+        # Step 3: Supreme Auditor
         c3.markdown("""
         <div style="background:#0F172A; border:2px solid #10B981; border-radius:16px; padding:16px; text-align:center;">
             <div style="font-size:45px;">⚖️</div>
             <h4 style="margin:4px 0; color:#10B981;">Supreme Auditor</h4>
             <div style="background:#1E293B; border-radius:12px; padding:10px; margin-top:8px; border:1px dashed #10B981; color:#E2E8F0; font-size:13px;">
-                💭 <i>"Reviewing Scholar & Inquisitor debate logs... Checking for collusion!"</i>
+                💭 <i>"Testing for collusion and certifying book ground truth..."</i>
             </div>
         </div>
         """, unsafe_allow_html=True)
 
-        audit_res = run_auditor(st.session_state["knowledge_base"], query, scholar_res, inquisitor_res)
-        
-        # Auditor Proclaims Verdict in speech bubble
+        audit_res = run_auditor(active_kbs, user_query, scholar_res, inquisitor_res)
+
         c3.markdown(f"""
         <div style="background:#0F172A; border:2px solid #10B981; border-radius:16px; padding:16px; text-align:center; box-shadow:0 0 15px rgba(16,185,129,0.3);">
             <div style="font-size:45px;">⚖️</div>
             <h4 style="margin:4px 0; color:#10B981;">Supreme Auditor</h4>
-            <div style="background:#047857; border-radius:12px; padding:12px; margin-top:8px; color:#FFFFFF; font-size:13px; text-align:left; box-shadow:0 2px 4px rgba(0,0,0,0.4);">
-                💬 <b>"Order in Court!</b> {audit_res.dialogue_statement}"
+            <div style="background:#047857; border-radius:12px; padding:12px; margin-top:8px; color:#FFFFFF; font-size:13px; text-align:left;">
+                💬 <b>"Verdict Certified!</b> {audit_res.dialogue_statement}"
             </div>
             <p style="color:#6EE7B7; font-size:11px; margin-top:6px;">🏆 Zero External Leaks — 100% Certified</p>
         </div>
@@ -864,18 +905,17 @@ else:
 
         st.divider()
 
-        # Display Final Certified Verdict
-        st.subheader("🏆 Certified Prediction Grounded Exclusively in Your Book")
+        st.subheader("🏆 Certified Audited Response (Strict Closed-Book)")
         st.success(audit_res.certified_answer)
 
-        r_col1, r_col2 = st.columns(2)
-        r_col1.info(f"📍 **Facts Extracted From Your Chart (IST UTC+5:30):**\n{scholar_res.client_chart_facts_used}")
-        r_col2.write("📚 **Exact Verses / Citations Quoted:**")
+        col_c1, col_c2 = st.columns(2)
+        col_c1.info(f"📍 **Domain Scope & Context Used:**\n{scholar_res.domain_and_context_used}")
+        col_c2.write("📚 **Exact Citations Quoted:**")
         for cite in scholar_res.book_citations_only:
-            r_col2.markdown(f"- 📌 *{cite}*")
+            col_c2.markdown(f"- 📌 *{cite}*")
 
         st.markdown("---")
         st.markdown("#### 🧠 Autonomous Agent Skill Evolution (Self-Learned Memory)")
-        st.caption("These rules were automatically synthesized and saved into `agent_skill_memory.json` during deliberations without user intervention:")
+        st.caption("Auto-synthesized lessons updated in `agent_skill_memory.json`:")
         for rule in load_skill_memory()[-5:]:
             st.markdown(f"- 💡 `{rule}`")
