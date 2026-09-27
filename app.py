@@ -25,7 +25,20 @@ CITIES_FILE = "cities_india.json"
 os.makedirs(KB_STORAGE_DIR, exist_ok=True)
 
 # Initialize Google GenAI client (Reads GEMINI_API_KEY from environment)
-client = genai.Client()
+# Retrieve API key from Streamlit Cloud Secrets OR local environment variable
+api_key = os.environ.get("GEMINI_API_KEY")
+if not api_key and hasattr(st, "secrets") and "GEMINI_API_KEY" in st.secrets:
+  api_key = st.secrets["GEMINI_API_KEY"]
+
+if not api_key:
+  st.error(
+      "⚠️ GEMINI_API_KEY is missing! Please configure it in your Streamlit Cloud"
+      " Secrets (Settings -> Secrets) or set it as an environment variable."
+  )
+  st.stop()
+
+# Initialize Google GenAI client with resolved key
+client = genai.Client(api_key=api_key)
 MODEL_ID = "gemini-flash-latest"
 
 RASHIS = [
