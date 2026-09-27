@@ -48,12 +48,33 @@ if not api_key:
 
 client = genai.Client(api_key=api_key)
 
-# Stable High-Quota Production Model Pool (1,500 requests/day)
-ACTIVE_MODELS = [
+# ============================================================================
+# Dynamic High-Quota Model Pool (Upgraded to Gemini 3.5 Series)
+# ============================================================================
+PREFERRED_MODELS = [
+    "gemini-3.5-flash",
+    "gemini-3.5-flash-lite",
+    "gemini-3.1-flash-lite",
     "gemini-2.5-flash",
-    "gemini-2.0-flash",
-    "gemini-2.5-flash-lite",
 ]
+
+@st.cache_resource
+def get_available_model_pool() -> List[str]:
+    """Inspects account models live and builds an active, non-deprecated pool."""
+    try:
+        available_names = [m.name.replace("models/", "") for m in client.models.list() if "generateContent" in (m.supported_actions or [])]
+        pool = [m for m in PREFERRED_MODELS if m in available_names]
+        if pool:
+            return pool
+        # Fallback to any active flash model found
+        flash_pool = [m for m in available_names if "flash" in m.lower() and "tts" not in m.lower() and "image" not in m.lower()]
+        if flash_pool:
+            return flash_pool
+    except Exception:
+        pass
+    return ["gemini-3.5-flash", "gemini-3.5-flash-lite"]
+
+ACTIVE_MODELS = get_available_model_pool()
 
 if "model_choice_idx" not in st.session_state:
     st.session_state["model_choice_idx"] = 0
@@ -464,10 +485,10 @@ def safe_generate_content(contents: list, config: types.GenerateContentConfig):
                 err_msg = str(e)
                 last_err = e
 
-                # Hard daily limit on preview models: rotate immediately
-                if "GenerateRequestsPerDay" in err_msg or "limit: 20" in err_msg or "limit: 0" in err_msg:
+                # Model decommissioned or daily quota reached -> auto-rotate immediately
+                if "404" in err_msg or "NOT_FOUND" in err_msg or "GenerateRequestsPerDay" in err_msg or "limit: 20" in err_msg or "limit: 0" in err_msg:
                     new_model = switch_to_backup_model()
-                    st.toast(f"Daily cap reached on {current_model}. Rotated to: {new_model}", icon="ℹ️")
+                    st.toast(f"Model rotated to {new_model}", icon="ℹ️")
                     break
 
                 # Minute-based burst rate limit (RPM/TPM)
@@ -482,9 +503,6 @@ def safe_generate_content(contents: list, config: types.GenerateContentConfig):
                     with st.spinner(f"⏳ Free quota buffer on {current_model}. Resuming in {int(wait_sec)}s..."):
                         time.sleep(wait_sec)
                 else:
-                    if "404" in err_msg or "NOT_FOUND" in err_msg:
-                        switch_to_backup_model()
-                        break
                     st.error(f"⚠️ API Client Error on {current_model}: {err_msg}")
                     st.stop()
 
@@ -879,7 +897,7 @@ else:
         </div>
         """, unsafe_allow_html=True)
 
-        time.sleep(3)  # RPM buffer for Free Tier
+        time.sleep(3)  # Rate pacing buffer
 
         # Step 2: The Inquisitor
         c2.markdown("""
@@ -907,7 +925,7 @@ else:
         </div>
         """, unsafe_allow_html=True)
 
-        time.sleep(3)  # RPM buffer for Free Tier
+        time.sleep(3)  # Rate pacing buffer
 
         # Step 3: Supreme Auditor
         c3.markdown("""
