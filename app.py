@@ -33,7 +33,6 @@ CATEGORIES = [
     "🌐 Others & General"
 ]
 
-# Ensure subdirectories exist for each category
 for cat in CATEGORIES:
     clean_cat_folder = re.sub(r'[^a-zA-Z0-9_\-]', '_', cat)
     os.makedirs(os.path.join(KB_BASE_DIR, clean_cat_folder), exist_ok=True)
@@ -48,7 +47,24 @@ if not api_key:
     st.stop()
 
 client = genai.Client(api_key=api_key)
-MODEL_ID = "gemini-flash-latest"
+
+# Stable High-Quota Production Model Pool (1,500 requests/day)
+ACTIVE_MODELS = [
+    "gemini-2.5-flash",
+    "gemini-2.0-flash",
+    "gemini-2.5-flash-lite",
+]
+
+if "model_choice_idx" not in st.session_state:
+    st.session_state["model_choice_idx"] = 0
+
+def get_active_model() -> str:
+    idx = st.session_state["model_choice_idx"] % len(ACTIVE_MODELS)
+    return ACTIVE_MODELS[idx]
+
+def switch_to_backup_model():
+    st.session_state["model_choice_idx"] = (st.session_state["model_choice_idx"] + 1) % len(ACTIVE_MODELS)
+    return get_active_model()
 
 RASHIS = [
     "Aries", "Taurus", "Gemini", "Cancer",
@@ -96,6 +112,7 @@ def load_all_india_cities() -> Dict[str, tuple]:
             "Agra, Uttar Pradesh": [27.1767, 78.0081],
             "Mumbai, Maharashtra": [19.0760, 72.8777],
             "Pune, Maharashtra": [18.5204, 73.8567],
+            "Nagpur, Maharashtra": [21.1458, 79.0882],
             "Bengaluru, Karnataka": [12.9716, 77.5946],
             "Hyderabad, Telangana": [17.3850, 78.4867],
             "Chennai, Tamil Nadu": [13.0827, 80.2707],
@@ -121,7 +138,7 @@ def load_all_india_cities() -> Dict[str, tuple]:
 
 
 # ============================================================================
-# 2. Astronomical Vedic Kundali Calculator (Only active for Astrology)
+# 2. Astronomical Vedic Kundali Calculator
 # ============================================================================
 def calculate_vedic_chart(dob: datetime.date, tob: datetime.time, lat: float, lon: float, overrides: Optional[dict] = None):
     ist_dt = datetime.datetime.combine(dob, tob)
@@ -333,7 +350,7 @@ def update_skill_memory(lesson: str):
 
 
 # ============================================================================
-# 4. Multi-Domain Pydantic Schemas
+# 4. Multi-Domain Pydantic Schemas (Pydantic V2 Compliant)
 # ============================================================================
 class BookKnowledgeBase(BaseModel):
     model_config = ConfigDict(extra="ignore")
@@ -428,39 +445,55 @@ def list_all_kbs() -> List[dict]:
 
 
 # ============================================================================
-# 6. Resilient Inference Engine
+# 6. Resilient Inference Engine (Never Crashes on Quota Exhaustion)
 # ============================================================================
 def safe_generate_content(contents: list, config: types.GenerateContentConfig):
-    for attempt in range(6):
-        try:
-            return client.models.generate_content(
-                model=MODEL_ID,
-                contents=contents,
-                config=config,
-            )
-        except google.genai.errors.ClientError as e:
-            err_msg = str(e)
-            if "429" in err_msg or "RESOURCE_EXHAUSTED" in err_msg:
-                wait_sec = 15.0
-                match = re.search(r"retry in (\d+(?:\.\d+)?)s", err_msg)
-                if match:
-                    try:
-                        wait_sec = min(max(float(match.group(1)) + 1.0, 5.0), 50.0)
-                    except Exception:
-                        pass
-                with st.spinner(f"⏳ Free quota buffer: Cooling down for {int(wait_sec)}s..."):
-                    time.sleep(wait_sec)
-            else:
-                st.error(f"⚠️ API Client Error: {err_msg}")
-                st.stop()
-        except google.genai.errors.ServerError:
-            time.sleep(min(6.0 * (attempt + 1), 30.0))
+    last_err = None
 
-    try:
-        return client.models.generate_content(model=MODEL_ID, contents=contents, config=config)
-    except Exception as e:
-        st.error(f"⚠️ Gemini quota saturated: {str(e)}. Please wait 30s and try again.")
-        st.stop()
+    for _ in range(len(ACTIVE_MODELS)):
+        current_model = get_active_model()
+
+        for retry in range(4):
+            try:
+                return client.models.generate_content(
+                    model=current_model,
+                    contents=contents,
+                    config=config,
+                )
+            except google.genai.errors.ClientError as e:
+                err_msg = str(e)
+                last_err = e
+
+                # Hard daily limit on preview models: rotate immediately
+                if "GenerateRequestsPerDay" in err_msg or "limit: 20" in err_msg or "limit: 0" in err_msg:
+                    new_model = switch_to_backup_model()
+                    st.toast(f"Daily cap reached on {current_model}. Rotated to: {new_model}", icon="ℹ️")
+                    break
+
+                # Minute-based burst rate limit (RPM/TPM)
+                if "429" in err_msg or "RESOURCE_EXHAUSTED" in err_msg:
+                    wait_sec = 6.0 * (retry + 1)
+                    match = re.search(r"retry in (\d+(?:\.\d+)?)s", err_msg)
+                    if match:
+                        try:
+                            wait_sec = min(max(float(match.group(1)) + 1.0, 3.0), 30.0)
+                        except Exception:
+                            pass
+                    with st.spinner(f"⏳ Free quota buffer on {current_model}. Resuming in {int(wait_sec)}s..."):
+                        time.sleep(wait_sec)
+                else:
+                    if "404" in err_msg or "NOT_FOUND" in err_msg:
+                        switch_to_backup_model()
+                        break
+                    st.error(f"⚠️ API Client Error on {current_model}: {err_msg}")
+                    st.stop()
+
+            except google.genai.errors.ServerError:
+                time.sleep(min(4.0 * (retry + 1), 20.0))
+
+    st.error(f"⚠️ All model quotas in the fallback pool are currently exhausted: {last_err}")
+    st.stop()
+
 
 def build_book_knowledge_base(book_file_ref: types.File, category: str) -> BookKnowledgeBase:
     system_prompt = f"""
@@ -484,7 +517,7 @@ def build_book_knowledge_base(book_file_ref: types.File, category: str) -> BookK
 
 
 # ============================================================================
-# 7. Tri-Agent Deliberation Core (Single Book, Category, or Cross-Genre)
+# 7. Tri-Agent Deliberation Core
 # ============================================================================
 def run_scholar(
     book_file_ref: Optional[types.File],
@@ -611,7 +644,6 @@ st.caption("Categorized Knowledge Base | Cross-Genre Inquiries | Strict Negative
 
 CITIES_DB = load_all_india_cities()
 
-# Sidebar: Categorized Library & Uploads
 with st.sidebar:
     st.header("🗂️ Knowledge Base Library")
     
@@ -629,7 +661,6 @@ with st.sidebar:
 
     st.divider()
 
-    # Upload & Management
     kb_mode = st.radio("Library Action:", ["📂 Select Existing Book(s)", "📤 Index & Upload New Book"], index=0)
 
     active_kbs: List[BookKnowledgeBase] = []
@@ -662,7 +693,6 @@ with st.sidebar:
             else:
                 st.info(f"No indexed books in '{selected_category}' yet. Switch to 'Index & Upload New Book' to add one.")
         else:
-            # Cross-Genre Selection
             all_entries = list_all_kbs()
             if all_entries:
                 st.caption(f"Found {len(all_entries)} books across all categories.")
@@ -736,7 +766,7 @@ with st.sidebar:
 # Main Stage: Dynamic Domain Display
 # ============================================================================
 
-# 1. Show Horoscope ONLY if Astrology is selected
+# Show Horoscope ONLY if Astrology is selected
 is_astrology_context = (selected_category == "🪐 Astrology & Jyotish") or (
     active_domain_mode == "🌐 Cross-Genre / All Categories" and any("Astrology" in b for b in st.session_state.get("loaded_book_names", []))
 )
@@ -772,7 +802,7 @@ if is_astrology_context and "user_kundali" in st.session_state:
 
     st.divider()
 
-# 2. Main Question & Answering Arena
+# Main Question & Answering Arena
 if "loaded_kbs" not in st.session_state or not st.session_state["loaded_kbs"]:
     st.warning("👈 Please select or index book(s) in the sidebar to begin.")
 else:
